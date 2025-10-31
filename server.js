@@ -1,7 +1,9 @@
+require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { parse } = require('csv-parse/sync');
+const database = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,7 +18,6 @@ const CSV_FILES = [
   'antique_furniture_shopify_import_table2.csv',
   'antique_furniture_shopify_import_table3.csv'
 ];
-const DECISIONS_FILE = 'decisions.json';
 
 // Load and parse CSV files
 function loadItems() {
@@ -51,27 +52,13 @@ function loadItems() {
   return Array.from(items.values());
 }
 
-// Load decisions from file
-function loadDecisions() {
-  if (fs.existsSync(DECISIONS_FILE)) {
-    const content = fs.readFileSync(DECISIONS_FILE, 'utf-8');
-    return JSON.parse(content);
-  }
-  return {};
-}
-
-// Save decisions to file
-function saveDecisions(decisions) {
-  fs.writeFileSync(DECISIONS_FILE, JSON.stringify(decisions, null, 2));
-}
-
 // API Routes
 
 // Get all items
-app.get('/api/items', (req, res) => {
+app.get('/api/items', async (req, res) => {
   try {
     const items = loadItems();
-    const decisions = loadDecisions();
+    const decisions = await database.loadDecisions();
 
     // Attach decision status to each item
     const itemsWithStatus = items.map(item => ({
@@ -87,10 +74,10 @@ app.get('/api/items', (req, res) => {
 });
 
 // Get progress
-app.get('/api/progress', (req, res) => {
+app.get('/api/progress', async (req, res) => {
   try {
     const items = loadItems();
-    const decisions = loadDecisions();
+    const decisions = await database.loadDecisions();
 
     const total = items.length;
     const completed = Object.keys(decisions).length;
@@ -112,7 +99,7 @@ app.get('/api/progress', (req, res) => {
 });
 
 // Save decision
-app.post('/api/decision', (req, res) => {
+app.post('/api/decision', async (req, res) => {
   try {
     const { handle, decision } = req.body;
 
@@ -120,9 +107,7 @@ app.post('/api/decision', (req, res) => {
       return res.status(400).json({ error: 'Invalid request' });
     }
 
-    const decisions = loadDecisions();
-    decisions[handle] = decision;
-    saveDecisions(decisions);
+    await database.saveDecision(handle, decision);
 
     res.json({ success: true });
   } catch (error) {
@@ -132,10 +117,10 @@ app.post('/api/decision', (req, res) => {
 });
 
 // Export results as CSV
-app.get('/api/export', (req, res) => {
+app.get('/api/export', async (req, res) => {
   try {
     const items = loadItems();
-    const decisions = loadDecisions();
+    const decisions = await database.loadDecisions();
 
     const itemsToDelete = items.filter(item => decisions[item.handle] === 'delete');
 
@@ -154,9 +139,29 @@ app.get('/api/export', (req, res) => {
   }
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`\n🚀 Server running at http://localhost:${PORT}`);
-  console.log(`\n📱 Client view: http://localhost:${PORT}/index.html`);
-  console.log(`👀 Admin view: http://localhost:${PORT}/admin.html\n`);
-});
+// Start server - connect to MongoDB first
+async function startServer() {
+  try {
+    // Connect to MongoDB
+    await database.connect();
+
+    // Start Express server
+    app.listen(PORT, () => {
+      console.log(`\n🚀 Server running at http://localhost:${PORT}`);
+      console.log(`\n📱 Client view: http://localhost:${PORT}/index.html`);
+      console.log(`👀 Admin view: http://localhost:${PORT}/admin.html\n`);
+    });
+
+    // Graceful shutdown
+    process.on('SIGINT', async () => {
+      console.log('\n\nShutting down gracefully...');
+      await database.close();
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();

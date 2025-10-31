@@ -143,3 +143,4 @@ Just ask!
 4. You can close the browser and come back later - progress is preserved
 5. Take your time - there's no rush!
 # lorrie-delete-inventory
+# lorrie-delete-inventory-mongodb
